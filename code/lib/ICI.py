@@ -1,67 +1,42 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict, Tuple, Union, Optional
-
+from typing import Dict, Optional, Union
 from collections import Counter
-from imblearn.over_sampling.base import BaseOverSampler
+
+from sklearn.base import BaseEstimator
+from imblearn.base import SamplerMixin
 from sklearn.utils.validation import check_X_y, check_array
 
 
-class ICI_harmonization(BaseOverSampler):
+class ICIHarmonization(BaseEstimator, SamplerMixin):
     """
-    Inter-Class Interpolator (ICI) harmonization.
+    Inter-Class Interpolation (ICI) Harmonization.
 
-    This oversampler removes spurious correlations between *site* and *class*
-    by performing **site-wise class balancing**. While the data is not directly harmonized,
-    as typically done in neuroimaging, the class distributions are equalized
-    across sites, which mitigates site-related biases in downstream classification tasks.
-
-    For each site:
-        - Detect the majority class
-        - Upsample *all minority classes* to match the majority count
-        - Works for binary and multi-class classification
-
-    This class wraps any oversampling strategy available in `imblearn`.
+    Performs site-wise oversampling to remove site–class correlation.
+    Works for binary and multi-class classification.
     """
 
     def __init__(
         self,
-        interpolator: Union[str, BaseOverSampler] = "smote",
+        interpolator: Union[str, SamplerMixin] = "smote",
         *,
         random_state: int = 42,
         verbose: bool = False,
         **kwargs,
-    ) -> None:
-        """
-        Parameters
-        ----------
-        interpolator : str or BaseOverSampler
-            Either:
-              - string identifier ("smote", "adasyn", ...)
-              - instantiated imblearn oversampler
-        random_state : int
-            Random seed
-        verbose : bool
-            Verbose output
-        kwargs :
-            Passed to the oversampler constructor
-        """
-        super().__init__()
+    ):
+        self.interpolator = interpolator
         self.random_state = random_state
         self.verbose = verbose
+        self.kwargs = kwargs
 
         if isinstance(interpolator, str):
-            self.interpolator = self._create_interpolator(interpolator, **kwargs)
-        elif isinstance(interpolator, BaseOverSampler):
-            self.interpolator = interpolator
+            self._base_sampler = self._create_interpolator(interpolator)
         else:
-            raise TypeError("interpolator must be a string or BaseOverSampler")
-
-        self.set_fit_request(sites=True)
+            self._base_sampler = interpolator
 
     # ------------------------------------------------------------------ #
-    # Core API
+    # Public API (correct extension point)
     # ------------------------------------------------------------------ #
 
     def fit_resample(
@@ -70,22 +45,9 @@ class ICI_harmonization(BaseOverSampler):
         y: np.ndarray,
         *,
         sites: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ):
         """
-        Perform site-wise oversampling.
-
-        Parameters
-        ----------
-        X : np.ndarray
-            Feature matrix
-        y : np.ndarray
-            Class labels
-        sites : np.ndarray
-            Site labels
-
-        Returns
-        -------
-        X_resampled, y_resampled, sites_resampled
+        Fit and resample the dataset using site-wise harmonization.
         """
         X, y = check_X_y(X, y)
         sites = check_array(sites, ensure_2d=False)
@@ -99,13 +61,12 @@ class ICI_harmonization(BaseOverSampler):
             X_site, y_site = X[mask], y[mask]
 
             if self.verbose:
-                print(f"[ICI] Processing site {site}: {Counter(y_site)}")
+                print(f"[ICI] Site {site}: {Counter(y_site)}")
 
-            # Determine target sampling strategy
-            sampling_strategy = self._build_sampling_strategy(y_site)
+            strategy = self._build_sampling_strategy(y_site)
 
-            if sampling_strategy:
-                sampler = self._clone_interpolator(sampling_strategy)
+            if strategy:
+                sampler = self._clone_sampler(strategy)
                 X_rs, y_rs = sampler.fit_resample(X_site, y_site)
             else:
                 X_rs, y_rs = X_site, y_site
@@ -114,79 +75,39 @@ class ICI_harmonization(BaseOverSampler):
             y_out.append(y_rs)
             sites_out.append(np.full(len(X_rs), site))
 
-        return (
-            np.vstack(X_out),
-            np.concatenate(y_out),
-            np.concatenate(sites_out),
-        )
+        self.sites_resampled_ = np.concatenate(sites_out)
+
+        return np.vstack(X_out), np.concatenate(y_out)
 
     # ------------------------------------------------------------------ #
-    # Internal helpers
+    # Helpers
     # ------------------------------------------------------------------ #
 
     def _build_sampling_strategy(self, y: np.ndarray) -> Optional[Dict[int, int]]:
-        """
-        Create a per-class sampling strategy that upsamples
-        all minority classes to the majority class count.
-        """
-        class_counts = Counter(y)
-
-        if len(class_counts) < 2:
+        counts = Counter(y)
+        if len(counts) < 2:
             return None
 
-        max_count = max(class_counts.values())
+        max_count = max(counts.values())
+        return {cls: max_count for cls, c in counts.items() if c < max_count} or None
 
-        strategy = {
-            cls: max_count
-            for cls, count in class_counts.items()
-            if count < max_count
-        }
-
-        return strategy if strategy else None
-
-    def _clone_interpolator(
-        self, sampling_strategy: Dict[int, int]
-    ) -> BaseOverSampler:
-        """
-        Clone interpolator with updated sampling strategy.
-        """
-        params = self.interpolator.get_params()
+    def _clone_sampler(self, sampling_strategy):
+        params = self._base_sampler.get_params()
         params["sampling_strategy"] = sampling_strategy
-        return self.interpolator.__class__(**params)
+        return self._base_sampler.__class__(**params)
 
-    # ------------------------------------------------------------------ #
-    # Validation & sanity checks
-    # ------------------------------------------------------------------ #
-
-    def _sanity_checks(
-        self, X: np.ndarray, y: np.ndarray, sites: np.ndarray
-    ) -> None:
+    def _sanity_checks(self, X, y, sites):
         if X.shape[0] != sites.shape[0]:
-            raise ValueError("X and sites must have same number of samples")
+            raise ValueError("X and sites must have same length")
 
         if len(np.unique(sites)) < 2:
-            raise ValueError("At least two unique sites are required")
+            raise ValueError("At least two sites required")
 
         for site in np.unique(sites):
-            y_site = y[sites == site]
-            if len(np.unique(y_site)) < 2:
-                raise ValueError(
-                    f"Site {site} contains only one class. "
-                    "Oversampling requires ≥2 classes per site."
-                )
+            if len(np.unique(y[sites == site])) < 2:
+                raise ValueError(f"Site {site} has only one class; cannot resample.")
 
-    # ------------------------------------------------------------------ #
-    # Interpolator factory
-    # ------------------------------------------------------------------ #
-
-    def _create_interpolator(
-        self, name: str, **kwargs
-    ) -> BaseOverSampler:
-        """
-        Factory for all imblearn oversamplers.
-        """
-        name = name.lower()
-
+    def _create_interpolator(self, name: str):
         from imblearn.over_sampling import (
             SMOTE,
             BorderlineSMOTE,
@@ -205,7 +126,13 @@ class ICI_harmonization(BaseOverSampler):
             "random": RandomOverSampler,
         }
 
+        name = name.lower()
         if name not in mapping:
             raise ValueError(f"Unsupported interpolator: {name}")
 
-        return mapping[name](random_state=self.random_state, **kwargs)
+        return mapping[name](random_state=self.random_state, **self.kwargs)
+
+    def _fit_resample(self, X, y, **params):
+        raise NotImplementedError(
+            "_fit_resample is not used. Use fit_resample(X, y, sites=...) instead."
+        )

@@ -6,7 +6,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "lib"))
 
 from lib.data_simulation import DataSimulator
-from lib.ICI_correction import ICI_Corrector
+from InterClassInterpolator.code.lib.ICI import ICI_harmonization
 from lib.utils import ModelEvaluator, ResultAnalyzer
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -22,7 +22,7 @@ random_state = 23
 data_simulator = DataSimulator(random_state=random_state)
 
 interpolator = SMOTE(random_state=random_state, k_neighbors=10)
-smote_corrector = ICI_Corrector(interpolator=interpolator)
+smote_corrector = ICI_harmonization(interpolator=interpolator)
 
 model_evaluator = ModelEvaluator(random_state=random_state)
 result_analyzer = ResultAnalyzer()
@@ -90,7 +90,7 @@ for train_idx, test_idx in cv.split(X, Y):
     score_train = roc_auc_score(y_train, y_pred_proba_train)
     scores.append([score, "Only site effect", "Unharmonized", "Train", "Unbalanced"])
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
@@ -149,7 +149,7 @@ for train_idx, test_idx in cv.split(X, Y):
     scores.append([score, "Only real signal", "Unharmonized", "Train", "Unbalanced"])
 
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
@@ -209,7 +209,7 @@ for train_idx, test_idx in cv.split(X, Y):
     score_train = roc_auc_score(y_train, y_pred_proba_train)
     scores.append([score, "Combined signal", "Unharmonized", "Train", "Unbalanced"])
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
@@ -288,7 +288,7 @@ for train_idx, test_idx in cv.split(X, Y):
     score_train = roc_auc_score(y_train, y_pred_proba_train)
     scores.append([score, "Only site effect", "Unharmonized", "Train", "Unbalanced"])
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
@@ -347,7 +347,7 @@ for train_idx, test_idx in cv.split(X, Y):
     scores.append([score, "Only real signal", "Unharmonized", "Train", "Unbalanced"])
 
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
@@ -407,7 +407,7 @@ for train_idx, test_idx in cv.split(X, Y):
     score_train = roc_auc_score(y_train, y_pred_proba_train)
     scores.append([score, "Combined signal", "Unharmonized", "Train", "Unbalanced"])
     # Apply SMOTE only to training data if requested
-    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.balance(
+    X_train_balanced, y_train_balanced, site_train_balanced = smote_corrector.fit_resample(
         X_train, y_train, site_train
     )
 
